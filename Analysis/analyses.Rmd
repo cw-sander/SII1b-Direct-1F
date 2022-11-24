@@ -1,0 +1,311 @@
+---
+title: "Analyses for SII Study 1b"
+output: 
+  html_notebook:
+  code_folding: hide
+---
+
+```{r setup, include = FALSE}
+# R version 4.2.1
+# load packages & set options
+library(dplyr) # dplyr_1.0.10
+library(ggplot2) # ggplot2_3.3.6
+library(ggpubr) # ggpubr_0.4.0
+library(ggrepel, include.only = "geom_label_repel") # ggrepel_0.9.1
+library(here) # here_1.0.1
+library(lmerTest) # lmerTest_3.1-3
+library(magrittr, include.only = "%T>%") # magrittr_2.0.3
+library(rstatix) # rstatix_0.7.0
+library(showtext) # showtext_0.9-5
+library(tidyverse) # tidyverse_1.3.2
+
+# Read data
+d_long <- readRDS(here::here("Processed data/d-long.rds"))
+
+# Demographics
+dems <- d_long %>%
+  select(subject_id, age, gender, starts_with("pol_")) %>%
+  unique()
+
+# Add custom font for plots
+font_add("Nunito",
+  regular = "/Users/carsten/Library/Fonts/NunitoSans-Regular.ttf",
+  italic = "/Users/carsten/Library/Fonts/NunitoSans-Italic.ttf",
+  bold = "/Users/carsten/Library/Fonts/NunitoSans-Bold.ttf",
+  bolditalic = "/Users/carsten/Library/Fonts/NunitoSans-BoldItalic.ttf")
+showtext_auto()
+
+# Custom functions
+formp <- function(p, text = FALSE) {
+  ## ---------------------------
+  ## Format p values
+  ##
+  ## This function takes in a number between
+  ## zero and one or a formatted p-value and outputs
+  ## a formatted p-value. If p-value is already formatted
+  ## then applying the function changes the format from
+  ## "p = .034" to ".034" and vice versa.
+  ##
+  ## @p p-value to be formatted
+  ## @text adds "p = " or "p < " to output
+  ##
+  ## @out string with formatted p-value
+  ## ---------------------------
+
+  # If already formatted but no "p" then add "p"
+  if (grepl("^<.\\d{3}$", p)) {
+  out <- gsub("<", "p < ", p)
+  } else if (grepl("^.\\d{3}$", p)) {
+  out <- gsub("^", "p = ", p)
+  # If already formatted and "p" then remove "p"
+  } else if (grepl("^p < .\\d{3}$", p)) {
+  out <- gsub("p < ", "<", p)
+  } else if (grepl("^p = .\\d{3}$", p)) {
+  out <- gsub("p = ", "", p)
+  # If not yet formatted and smaller than .001
+  } else if (is.numeric(p) && p < 0.001) {
+  if (text) {
+    out <- "p < .001"
+  } else {
+    out <- "<.001"
+  }
+  # If not yet formatted and bigger than .001
+  } else if (p >= 0.001) {
+  p <- format(round(p, 3), nsmall = 3, scientific = FALSE)
+  p <- sub("0.", ".", p)
+  if (text) {
+    out <- paste("p =", p)
+  } else {
+    out <- p
+  }
+  }
+  return(out)
+}
+forma <- function(number, dec = NULL, lead_zero = TRUE) { # nolint
+  ## ---------------------------
+  ## Format values in apa style
+  ##
+  ## This function takes in a number and outputs
+  ## a formatted number. If no decimal is provided, then
+  ## it uses a heuristic to round the number. If lead_zero
+  ## is set to FALSE, then the lead zero of the number is
+  ## removed (useful for p-values or eta squared).
+  ##
+  ## @number input number
+  ## @dec optional number of decimals
+  ## @lead_zero keep leading zero
+  ##
+  ## @out formatted number
+  ## ---------------------------
+
+  # If dec is logical, interpret as lead_zero
+  if (is.logical(dec)) {
+  lead_zero <- dec
+  dec <- NULL
+  }
+  # If no decimal is specified, use heuristic
+  if (!is.null(dec)) {
+  } else if (abs(number) >= 100) {
+    dec <- 0
+  } else if (abs(number) >= 10 && number < 100) {
+    dec <- 1
+  } else if (abs(number) >= 0.1 && number < 10) {
+    dec <- 2
+  } else if (abs(number) >= 0.001 && number < 0.1) {
+    dec <- 3
+  } else if (abs(number) < 0.001 && number != 0) {
+    dec <- stringr::str_locate(format(
+      abs(number), scientific = FALSE), "[1-9]{1}")[1] - 2
+  } else if (number == 0) {
+    dec <- 0
+  }
+  # Round number to decimal
+  out <- format(round(number, dec), nsmall = dec, scientific = FALSE)
+  # Remove leading zero if required
+  if (out < 1 && lead_zero == FALSE) {
+  out <- sub("0.", ".", out)
+  }
+  return(out)
+}
+theme_cs_talk <- function(font = "Nunito", lab_size = 16, label_size = 14,
+  dark = "#7A8450", light = "#F7FF8C", solid_facet = TRUE) {
+  if (solid_facet) {
+  facet_fill <- dark
+  facet_text <- light
+  } else if (!solid_facet) {
+  facet_fill <- "transparent"
+  facet_text <- dark
+  }
+  theme_bw(base_size = 16) %+replace%
+  theme(
+  # Rectangle elements
+  plot.background = element_rect(fill = "transparent",
+    color = NA_character_),
+  panel.background = element_rect(fill = "transparent"),
+  legend.background = element_rect(fill = "transparent", color = NA),
+  strip.background = element_rect(color = facet_fill,
+    fill = facet_fill, size = 1),
+  # Text elements
+  plot.title = element_text(family = font, size = lab_size,
+    face = "bold", hjust = 0, vjust = 2, color = dark),
+  plot.subtitle = element_text(family = font,
+    size = lab_size - 2, color = dark),
+  plot.caption = element_text(family = font, size = lab_size,
+    hjust = 1, color = dark),
+  axis.title = element_text(family = font, size = lab_size,
+    color = dark),
+  axis.text = element_text(family = font, size = label_size,
+    color = dark),
+  axis.text.x = element_text(margin = margin(5, b = 10),
+    color = dark),
+  legend.title = element_text(family = font, size = lab_size,
+    color = dark, hjust = 0),
+  legend.text = element_text(family = font, size = label_size,
+    color = dark),
+  strip.text = element_text(family = font, size = label_size,
+    color = facet_text, margin = margin(4, 4, 4, 4)),
+  # Line elements
+  axis.ticks = element_line(color = dark, size = 0.5),
+  legend.key = element_rect(fill = "transparent", color = NA_character_),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.border = element_rect(color = dark, fill = NA, size = 1)
+  )
+}
+```
+
+### Introduction
+Research on person perception has revealed that people tend to attribute other's behavior to stable person characteristics, even if it can just as well be explained by reasons such as situational factors or mental states. This tendency is known as the correspondence bias (Gilbert & Malone, 1995) and may play an important role in the domain of political polarization. Specifically, people may attribute each other's politically relevant behaviors to stable ideological dispositions (such as leftist, conservative, racist, or feminist), while neglecting potential other causes and thereby impeding mutual understanding. To investigate the role of the correspondence bias in political polarization we first examine whether ideological dispositions are inferred from behavioral descriptions. We expect attributions of implied dispositions (i.e., ideological dispositions implied by but not included in the sentence) to be stronger than of dispositions not implied in the sentence (but rather in another sentence of the task).
+
+### Sample Characteristics
+We collected data from a total of N = 27 participants. Following our pre-registered exclusion criteria, we had to exclude no participants. This resulted in a sample of N = `r nrow(dems)` participants (`r nrow(filter(dems, gender == "female"))` female, `r nrow(filter(dems, gender == "male"))` male, `r nrow(filter(dems, gender == "other"))` other, `r nrow(filter(dems, gender %in% c("not specified","")))` not specified; average age M = `r round(mean(dems$age, na.rm = TRUE), 1)` years, SD = `r round(sd(dems$age, na.rm = TRUE), 1)`, ranging from `r min(dems$age, na.rm = TRUE)` to `r max(dems$age, na.rm = TRUE)`). Participants were recruited via the online platform Prolific (www.prolific.co) and received monetary compensation of 1.35 GBP for completing the 9-minute study. An additional 3 people started the experiment on prolific but either returned their submission, timed-out, or only partially completed the experiment due to technical issues.
+
+On average, participants reported to be rather left leaning (M = `r round(mean(dems$pol_orientation), 1)`, SD = `r round(sd(dems$pol_orientation), 1)` on a scale from 1 = left to 10 = right), rather interested in politics (M = `r round(mean(dems$pol_interest), 1)`, SD = `r round(sd(dems$pol_interest), 1)`, on a scale ranging from 1 = not at all to 10 = very strongly), and moderately satisfied with the German political system (M = `r round(mean(dems$pol_satisfaction), 1)`, SD = `r round(sd(dems$pol_satisfaction), 1)`, on a scale ranging from 1 = satisfied to 4 = dissatisfied).
+
+### Preregistered analysis {.tabset}
+```{r rate analysis, warning = FALSE, message = FALSE}
+# Prepare reaction time data
+rate <- d_long %>%
+  select(subject_id, probe_type, rating) %>%
+  mutate(probe_type = recode(probe_type,
+    "implied" = "implied", "implied_other" = "implied other")) %>%
+  group_by(probe_type, subject_id) %>%
+  summarize(.groups = "drop_last", rating = mean(rating, na.rm = TRUE)) %>%
+  # Find extreme outliers
+  mutate(is_extreme = is_extreme(rating)) %>%
+  ungroup() %T>%
+  # Count participants that have extreme outliers
+  assign(x = "rt_ex_n", envir = .GlobalEnv, value = n_distinct(
+    select(filter(., is_extreme == TRUE), subject_id)))
+
+# Create data frames where these rows are excluded
+rate_ex <- filter(rate, is_extreme == FALSE)
+
+# Descriptives
+rate_desc <- rate_ex %>%
+  group_by(probe_type) %>%
+  get_summary_stats(rating, type = "mean_sd") %>%
+  mutate(
+    ci95_low = mean - 1.96 * sd / sqrt(n),
+    ci95_upp = mean + 1.96 * sd / sqrt(n))
+
+# One-sided paired t-test
+rate_t <- rate_ex %>%
+  t_test(
+    rating ~ probe_type,
+    paired = TRUE,
+    alternative = "greater",
+    ref.group = "implied")
+
+# Cohens dz
+rate_dz <- rate_ex %>%
+  cohens_d(rating ~ probe_type,
+    paired = TRUE, ref.group = "implied") %>%
+  pull(effsize)
+
+# Print t-test
+rate_t_report <- paste0("t(", rate_t$n1, ") = ", forma(rate_t$statistic),
+  ", ", formp(rate_t$p, TRUE), ", d~z~ = ", forma(rate_dz))
+rate_t_plot <- paste0("t(", rate_t$n1, ") = ", forma(rate_t$statistic),
+  ",\n", formp(rate_t$p, TRUE), ",\ndz = ", forma(rate_dz))
+```
+
+To prepare the ratings for analysis we computed the average for each experimental condition.
+
+#### Outlier detection
+```{r rate outlier, message = FALSE}
+rate %>%
+  {
+    ggplot(., aes(probe_type, rating)) +
+    geom_boxplot(color = "#7A8450") +
+    labs(x = "Probe type", y = "Mean rating") +
+    theme_cs_talk()
+  } %T>%
+  ggexport(., width = 5, height = 5,
+       filename = here("Analysis/rate-outlier-plot.pdf"))
+```
+
+We looked for extreme outliers in each cell of the design. We defined them as values above Q3 + 3 * IQR or below Q1 - 3 * IQR. We found and excluded `r rt_ex_n` participants whose values were extreme outliers.
+
+#### QQ-Plot
+```{r rate qq, message = FALSE}
+rate_ex %>%
+  pivot_wider(names_from = probe_type, values_from = rating) %>%
+  mutate(diff = implied - `implied other`) %>%
+  {
+    ggplot(., aes(sample = diff)) +
+    labs(x = "Theoretical quantiles", y = "Data quantiles") +
+    stat_qq(color = "#7A8450") +
+    stat_qq_line(color = "#7A8450") +
+    theme_cs_talk()
+  } %T>%
+  ggexport(width = 5, height = 5,
+       filename = here("Analysis/rate-qq-plot.pdf"))
+```
+
+Upon visual inspection the differences between the implied and implied-other conditions did not seem severely non-normal. We therefore applied no transformations before conducting a paired t-test.
+
+#### T-test
+On average, participants attributed the implied labels (M = `r forma(rate_desc$mean[1])`, SD = `r forma(rate_desc$sd[1])`) to a stronger extent than the implied other labels (M = `r forma(rate_desc$mean[2])`, SD = `r forma(rate_desc$sd[2])`), `r rate_t_report`. This indicates that participants indeed inferred the labels that were implied in the statements.
+
+#### Descriptives
+```{r rate descriptives}
+knitr::kable(rate_desc, format = "markdown")
+```
+
+#### Barplot
+```{r rate barplot, message = FALSE}
+rate_desc %>%
+  {
+    ggplot(., aes(probe_type, mean)) +
+    labs(x = "Probe type", y = "Mean response latency in seconds") +
+    geom_bar(stat = "identity", color = "#7A8450", fill = "white") +
+    geom_linerange(aes(ymin = ci95_low, ymax = ci95_upp), color = "#7A8450") +
+    geom_label(aes(x = 2.15, y = 3.8, label = rate_t_plot),
+      fill = "white", color = "#7A8450", show.legend = FALSE,
+      label.padding = unit(0.5, "lines"), label.size = 0.5) +
+    theme_cs_talk()
+  } %T>%
+  ggexport(width = 4, height = 5,
+       filename = here::here("Analysis/rate-barplot.pdf"))
+```
+
+### Exploratory by-item and analyses {.tabset}
+We conducted exploratory by-item analyses. We grouped the data by item-id and probe type and aggregated the ratings. For each item we calculated the inference-effect as a difference score (implied minus implied-other), with higher values indicating stronger inference effects.
+
+#### Item-effects
+```{r by-item analysis, message = FALSE}
+item <- d_long %>%
+  select(item_id, behavior, label = probe, probe_type, rating) %>%
+  group_by(item_id, behavior, label, probe_type) %>%
+  summarize(.groups = "drop", rating = mean(rating, na.rm = TRUE)) %>%
+  pivot_wider(names_from = probe_type, values_from = c(label, rating)) %>%
+  mutate(inference_effect = rating_implied - rating_implied_other) %>%
+  rename(implied = rating_implied, implied_other = rating_implied_other) %>%
+  rowwise() %>%
+  mutate(across(c(implied, implied_other, inference_effect), forma))
+
+knitr::kable(item, format = "markdown")
+```
+
+All items had a positive inference effect.
