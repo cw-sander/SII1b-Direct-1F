@@ -195,7 +195,7 @@ rate <- d_long %>%
   mutate(is_extreme = is_extreme(rating)) %>%
   ungroup() %T>%
   # Count participants that have extreme outliers
-  assign(x = "rt_ex_n", envir = .GlobalEnv, value = n_distinct(
+  assign(x = "rate_ex_n", envir = .GlobalEnv, value = n_distinct(
     select(filter(., is_extreme == TRUE), subject_id)))
 
 # Create data frames where these rows are excluded
@@ -245,7 +245,7 @@ rate %>%
        filename = here("Analysis/rate-outlier-plot.pdf"))
 ```
 
-We looked for extreme outliers in each cell of the design. We defined them as values above Q3 + 3 * IQR or below Q1 - 3 * IQR. We found and excluded `r rt_ex_n` participants whose values were extreme outliers.
+We looked for extreme outliers in each cell of the design. We defined them as values above Q3 + 3 * IQR or below Q1 - 3 * IQR. We found and excluded `r rate_ex_n` participants whose values were extreme outliers.
 
 #### QQ-Plot
 ```{r rate qq, message = FALSE}
