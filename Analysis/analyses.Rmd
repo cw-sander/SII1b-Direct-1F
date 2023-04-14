@@ -184,7 +184,7 @@ On average, participants reported to be rather left leaning (M = `r round(mean(d
 
 ### Preregistered analysis {.tabset}
 ```{r rate analysis, warning = FALSE, message = FALSE}
-# Prepare reaction time data
+# Prepare rating data
 rate <- d_long %>%
   select(subject_id, probe_type, rating) %>%
   mutate(probe_type = recode(probe_type,
@@ -224,9 +224,9 @@ rate_dz <- rate_ex %>%
   pull(effsize)
 
 # Print t-test
-rate_t_report <- paste0("t(", rate_t$n1, ") = ", forma(rate_t$statistic),
+rate_t_report <- paste0("t(", rate_t$df, ") = ", forma(rate_t$statistic),
   ", ", formp(rate_t$p, TRUE), ", d~z~ = ", forma(rate_dz))
-rate_t_plot <- paste0("t(", rate_t$n1, ") = ", forma(rate_t$statistic),
+rate_t_plot <- paste0("t(", rate_t$df, ") = ", forma(rate_t$statistic),
   ",\n", formp(rate_t$p, TRUE), ",\ndz = ", forma(rate_dz))
 ```
 
@@ -291,21 +291,116 @@ rate_desc %>%
 ```
 
 ### Exploratory by-item and analyses {.tabset}
-We conducted exploratory by-item analyses. We grouped the data by item-id and probe type and aggregated the ratings. For each item we calculated the inference-effect as a difference score (implied minus implied-other), with higher values indicating stronger inference effects.
+To investigate whether the effect occurred for all items rather than just for a few, we computed a one-tailed dependent samples t-test for each item independently. Inference effects were significant for all 24 items (all ps < .001, dz ranging from 0.78 to 5.36).
 
-#### Item-effects
+#### Item analysis
 ```{r by-item analysis, message = FALSE}
-item <- d_long %>%
-  select(item_id, behavior, label = probe, probe_type, rating) %>%
-  group_by(item_id, behavior, label, probe_type) %>%
-  summarize(.groups = "drop", rating = mean(rating, na.rm = TRUE)) %>%
-  pivot_wider(names_from = probe_type, values_from = c(label, rating)) %>%
-  mutate(inference_effect = rating_implied - rating_implied_other) %>%
-  rename(implied = rating_implied, implied_other = rating_implied_other) %>%
-  rowwise() %>%
-  mutate(across(c(implied, implied_other, inference_effect), forma))
+item_results <- data.frame()
+for (id in unique(d_long$item_id)) {
+  sub <- d_long %>%
+    filter(item_id == id) %>%
+    select(item_id, subject_id, label = probe, probe_type, rating)
 
-knitr::kable(item, format = "markdown")
+  # Descriptives
+  sub_desc <- sub %>%
+    group_by(item_id, probe_type, label) %>%
+    get_summary_stats(rating, type = "mean") %>%
+    pivot_wider(names_from = probe_type, values_from = c(mean, label)) %>%
+    mutate(inference_effect = mean_implied - mean_implied_other) %>%
+    select(item_id, implied = mean_implied, implied_other = mean_implied_other,
+      inference_effect, label_implied, label_implied_other)
+
+  # One-sided paired t-test
+  sub_t <- sub %>%
+    t_test(
+      rating ~ probe_type,
+      paired = TRUE,
+      alternative = "greater",
+      ref.group = "implied") %>%
+    rename(t = statistic) %>%
+    select(-.y., -group1, -group2, -n1, -n2)
+
+  # Cohens dz
+  sub_dz <- sub %>%
+    cohens_d(rating ~ probe_type,
+      paired = TRUE, ref.group = "implied") %>%
+    select(`cohen's dz` = effsize)
+
+  # Merge
+  sub_all <- cbind(sub_desc, sub_t, sub_dz)
+  item_results <- rbind(item_results, sub_all)
+}
+
+item_results <- item_results %>%
+  rowwise() %>%
+  mutate(across(
+    c(implied, implied_other, inference_effect, t, `cohen's dz`), forma)) %>%
+  mutate(p = formp(p))
+
+knitr::kable(item_results, format = "markdown")
 ```
 
-All items had a positive inference effect.
+#### Item table
+```{r by-item discounting table}
+item_results <- data.frame()
+for (id in unique(d_long$item_id)) {
+  sub <- d_long %>%
+    filter(item_id == id) %>%
+    select(item_id, subject_id, probe_type, rating)
+
+  # Descriptives
+  sub_desc <- sub %>%
+    group_by(item_id, probe_type) %>%
+    get_summary_stats(rating, type = "mean_sd") %>%
+    ungroup() %>%
+    select(-item_id, -variable, -n) %>%
+    pivot_wider(values_from = c(mean, sd), names_from = probe_type)
+
+  # Two-sided Welch two-sample t-test
+  sub_t <- sub %>%
+    t_test(
+      rating ~ probe_type,
+      paired = TRUE,
+      alternative = "greater",
+      ref.group = "implied") %>%
+    rename(t = statistic) %>%
+    select(-.y., -group1, -group2, -n1, -n2)
+
+  # Cohens dz
+  sub_d <- sub %>%
+    cohens_d(rating ~ probe_type,
+      paired = TRUE, ref.group = "implied") %>%
+    select(`cohen's d` = effsize)
+
+  # Merge
+  sub_all <- cbind(id, sub_desc, sub_t, sub_d)
+  item_results <- rbind(item_results, sub_all)
+}
+
+item_results <- item_results %>%
+  rename(item_id = id) %>%
+  rowwise() %>%
+  mutate(across(
+    matches("^t|df|mean_|sd_"), forma)) %>%
+  mutate(across(
+    matches("_cohen"), ~ forma(.x, dec = 2)
+  )) %>%
+  mutate(p = formp(p))
+
+library(readxl)
+stims <- read_xlsx(here::here("Processed data/stimuli_EN.xlsx")) %>%
+  left_join(item_results) %>%
+  rowwise() %>%
+  mutate(.keep = "unused",
+    label_score = forma(as.numeric(label_score)),
+    across(matches("consensus"),
+      ~ paste0(round(as.numeric(.x), 2) * 100, "%")),
+    category = paste0(implied, " ", "(", implied_other, ")"),
+    consensus = paste0(sconsensus, " ", "(", cconsensus, ")"),
+    implied_other = paste0(mean_implied_other, " ", "(", sd_implied_other, ")"),
+    implied = paste0(mean_implied, " ", "(", sd_implied, ")")) %>%
+  select(12, 2, 7, 13, 4, 3, 8, 9, 10, 11)
+
+knitr::kable(stims, format = "markdown")
+write_csv2(stims, "Analysis/item_results.csv")
+```
