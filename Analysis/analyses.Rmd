@@ -1,5 +1,5 @@
 ---
-title: "Analyses for SII Study 1b"
+title: "Analyses for SII Experiment 1"
 output: 
   html_notebook:
   code_folding: hide
@@ -174,9 +174,6 @@ theme_cs_talk <- function(font = "Nunito", lab_size = 16, label_size = 14,
 }
 ```
 
-### Introduction
-Research on person perception has revealed that people tend to attribute other's behavior to stable person characteristics, even if it can just as well be explained by reasons such as situational factors or mental states. This tendency is known as the correspondence bias (Gilbert & Malone, 1995) and may play an important role in the domain of political polarization. Specifically, people may attribute each other's politically relevant behaviors to stable ideological dispositions (such as leftist, conservative, racist, or feminist), while neglecting potential other causes and thereby impeding mutual understanding. To investigate the role of the correspondence bias in political polarization we first examine whether ideological dispositions are inferred from behavioral descriptions. We expect attributions of implied dispositions (i.e., ideological dispositions implied by but not included in the sentence) to be stronger than of dispositions not implied in the sentence (but rather in another sentence of the task).
-
 ### Sample Characteristics
 We collected data from a total of N = 27 participants. Following our pre-registered exclusion criteria, we had to exclude no participants. This resulted in a sample of N = `r nrow(dems)` participants (`r nrow(filter(dems, gender == "female"))` female, `r nrow(filter(dems, gender == "male"))` male, `r nrow(filter(dems, gender == "other"))` other, `r nrow(filter(dems, gender %in% c("not specified","")))` not specified; average age M = `r round(mean(dems$age, na.rm = TRUE), 1)` years, SD = `r round(sd(dems$age, na.rm = TRUE), 1)`, ranging from `r min(dems$age, na.rm = TRUE)` to `r max(dems$age, na.rm = TRUE)`). Participants were recruited via the online platform Prolific (www.prolific.co) and received monetary compensation of 1.35 GBP for completing the 9-minute study. An additional 3 people started the experiment on prolific but either returned their submission, timed-out, or only partially completed the experiment due to technical issues.
 
@@ -234,33 +231,27 @@ To prepare the ratings for analysis we computed the average for each experimenta
 
 #### Outlier detection
 ```{r rate outlier, message = FALSE}
-rate %>%
-  {
-    ggplot(., aes(probe_type, rating)) +
-    geom_boxplot(color = "#7A8450") +
-    labs(x = "Probe type", y = "Mean rating") +
-    theme_cs_talk()
-  } %T>%
-  ggexport(., width = 5, height = 5,
-       filename = here("Analysis/rate-outlier-plot.pdf"))
+rate_outlier_plot <- rate %>%
+  ggplot(., aes(probe_type, rating)) +
+  geom_boxplot(color = "#7A8450") +
+  labs(x = "Probe type", y = "Mean rating") +
+  theme_cs_talk()
+rate_outlier_plot
 ```
 
 We looked for extreme outliers in each cell of the design. We defined them as values above Q3 + 3 * IQR or below Q1 - 3 * IQR. We found and excluded `r rate_ex_n` participants whose values were extreme outliers.
 
 #### QQ-Plot
 ```{r rate qq, message = FALSE}
-rate_ex %>%
+rate_qq_plot <- rate_ex %>%
   pivot_wider(names_from = probe_type, values_from = rating) %>%
   mutate(diff = implied - `implied other`) %>%
-  {
-    ggplot(., aes(sample = diff)) +
-    labs(x = "Theoretical quantiles", y = "Data quantiles") +
-    stat_qq(color = "#7A8450") +
-    stat_qq_line(color = "#7A8450") +
-    theme_cs_talk()
-  } %T>%
-  ggexport(width = 5, height = 5,
-       filename = here("Analysis/rate-qq-plot.pdf"))
+  ggplot(., aes(sample = diff)) +
+  labs(x = "Theoretical quantiles", y = "Data quantiles") +
+  stat_qq(color = "#7A8450") +
+  stat_qq_line(color = "#7A8450") +
+  theme_cs_talk()
+rate_qq_plot
 ```
 
 Upon visual inspection the differences between the implied and implied-other conditions did not seem severely non-normal. We therefore applied no transformations before conducting a paired t-test.
@@ -275,19 +266,16 @@ knitr::kable(rate_desc, format = "markdown")
 
 #### Barplot
 ```{r rate barplot, message = FALSE}
-rate_desc %>%
-  {
-    ggplot(., aes(probe_type, mean)) +
-    labs(x = "Probe type", y = "Mean response latency in seconds") +
-    geom_bar(stat = "identity", color = "#7A8450", fill = "white") +
-    geom_linerange(aes(ymin = ci95_low, ymax = ci95_upp), color = "#7A8450") +
-    geom_label(aes(x = 2.15, y = 3.8, label = rate_t_plot),
-      fill = "white", color = "#7A8450", show.legend = FALSE,
-      label.padding = unit(0.5, "lines"), label.size = 0.5) +
-    theme_cs_talk()
-  } %T>%
-  ggexport(width = 4, height = 5,
-       filename = here::here("Analysis/rate-barplot.pdf"))
+rate_barplot <- rate_desc %>%
+  ggplot(., aes(probe_type, mean)) +
+  labs(x = "Probe type", y = "Mean response latency in seconds") +
+  geom_bar(stat = "identity", color = "#7A8450", fill = "white") +
+  geom_linerange(aes(ymin = ci95_low, ymax = ci95_upp), color = "#7A8450") +
+  geom_label(aes(x = 2.15, y = 3.8, label = rate_t_plot),
+    fill = "white", color = "#7A8450", show.legend = FALSE,
+    label.padding = unit(0.5, "lines"), label.size = 0.5) +
+  theme_cs_talk()
+rate_barplot
 ```
 
 ### Exploratory by-item and analyses {.tabset}
@@ -340,67 +328,11 @@ item_results <- item_results %>%
 knitr::kable(item_results, format = "markdown")
 ```
 
-#### Item table
-```{r by-item discounting table}
-item_results <- data.frame()
-for (id in unique(d_long$item_id)) {
-  sub <- d_long %>%
-    filter(item_id == id) %>%
-    select(item_id, subject_id, probe_type, rating)
-
-  # Descriptives
-  sub_desc <- sub %>%
-    group_by(item_id, probe_type) %>%
-    get_summary_stats(rating, type = "mean_sd") %>%
-    ungroup() %>%
-    select(-item_id, -variable, -n) %>%
-    pivot_wider(values_from = c(mean, sd), names_from = probe_type)
-
-  # Two-sided Welch two-sample t-test
-  sub_t <- sub %>%
-    t_test(
-      rating ~ probe_type,
-      paired = TRUE,
-      alternative = "greater",
-      ref.group = "implied") %>%
-    rename(t = statistic) %>%
-    select(-.y., -group1, -group2, -n1, -n2)
-
-  # Cohens dz
-  sub_d <- sub %>%
-    cohens_d(rating ~ probe_type,
-      paired = TRUE, ref.group = "implied") %>%
-    select(`cohen's d` = effsize)
-
-  # Merge
-  sub_all <- cbind(id, sub_desc, sub_t, sub_d)
-  item_results <- rbind(item_results, sub_all)
-}
-
-item_results <- item_results %>%
-  rename(item_id = id) %>%
-  rowwise() %>%
-  mutate(across(
-    matches("^t|df|mean_|sd_"), forma)) %>%
-  mutate(across(
-    matches("_cohen"), ~ forma(.x, dec = 2)
-  )) %>%
-  mutate(p = formp(p))
-
-library(readxl)
-stims <- read_xlsx(here::here("Processed data/stimuli_EN.xlsx")) %>%
-  left_join(item_results) %>%
-  rowwise() %>%
-  mutate(.keep = "unused",
-    label_score = forma(as.numeric(label_score)),
-    across(matches("consensus"),
-      ~ paste0(round(as.numeric(.x), 2) * 100, "%")),
-    category = paste0(implied, " ", "(", implied_other, ")"),
-    consensus = paste0(sconsensus, " ", "(", cconsensus, ")"),
-    implied_other = paste0(mean_implied_other, " ", "(", sd_implied_other, ")"),
-    implied = paste0(mean_implied, " ", "(", sd_implied, ")")) %>%
-  select(12, 2, 7, 13, 4, 3, 8, 9, 10, 11)
-
-knitr::kable(stims, format = "markdown")
-write_csv2(stims, "Analysis/item_results.csv")
+```{r save plots, message = FALSE, eval = FALSE}
+ggexport(rate_outlier_plot, width = 5, height = 5,
+  filename = here("Analysis/rate-outlier-plot.pdf"))
+ggexport(rate_qq_plot, width = 5, height = 5,
+  filename = here("Analysis/rate-qq-plot.pdf"))
+ggexport(rate_barplot, width = 4, height = 5,
+  filename = here::here("Analysis/rate-barplot.pdf"))
 ```
